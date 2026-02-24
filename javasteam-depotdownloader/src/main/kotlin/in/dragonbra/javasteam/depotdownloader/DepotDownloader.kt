@@ -156,6 +156,8 @@ class DepotDownloader @JvmOverloads constructor(
 
     private val progressUpdateInterval = 500L // ms
 
+    private var lastProgressUpdate = 0L
+
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob(parentJob))
 
     private var cdnClientPool: CDNClientPool? = null
@@ -211,6 +213,7 @@ class DepotDownloader @JvmOverloads constructor(
         val androidEmulation: Boolean = false,
         val downloadManifestOnly: Boolean = false,
         val installToGameNameDirectory: Boolean = false,
+        val downloadPath: Path? = null,
 
         // Not used yet in code
         val usingFileList: Boolean = false,
@@ -1571,7 +1574,8 @@ class DepotDownloader @JvmOverloads constructor(
         ensureActive()
 
         // Create temporary file path for this chunk
-        val chunkTempDir = depot.installDir / STAGING_DIR / "chunks" / fileId
+        // Try to set it to the Download path, use installdir as fallback, probably unessecary
+        val chunkTempDir = (config.downloadPath ?: depot.installDir) / STAGING_DIR / "chunks" / fileId
         filesystem.createDirectories(chunkTempDir)
         val chunkTempPath = chunkTempDir / "${chunk.offset}_$chunkID.chunk"
 
@@ -1727,6 +1731,7 @@ class DepotDownloader @JvmOverloads constructor(
                     downloadManifestOnly = item.downloadManifestOnly,
                     installPath = item.installDirectory?.toPath(),
                     installToGameNameDirectory = item.installToGameNameDirectory,
+                    downloadPath = (item as? AppItem)?.downloadDirectory?.toPath(),
                 )
 
                 processingItemsMap[item.appId] = item
@@ -1835,7 +1840,7 @@ class DepotDownloader @JvmOverloads constructor(
         val file = item.file
         val fileFinalPath = depot.installDir / file.fileName
         val chunk = item.chunk
-        val chunkTempDir = depot.installDir / STAGING_DIR / "chunks" / item.fileId
+        val chunkTempDir = (config.downloadPath ?: depot.installDir) / STAGING_DIR / "chunks" / item.fileId
 
         val writeOffset = file.chunks.filter { it.offset < chunk.offset }.sumOf { it.uncompressedLength.toLong() }
 
@@ -1888,14 +1893,19 @@ class DepotDownloader @JvmOverloads constructor(
             }
 
             val depotPercentage = (sizeDownloaded.toFloat() / depotDownloadCounter.completeDownloadSize)
-
-            notifyListeners { listener ->
-                listener.onChunkCompleted(
-                    depotId = depot.depotId,
-                    depotPercentComplete = depotPercentage,
-                    compressedBytes = downloadCounter.totalBytesCompressed,
-                    uncompressedBytes = downloadCounter.totalBytesUncompressed
-                )
+            // Limiting the listener calls to once every 0.5s significantly improves performance on SD cards
+            val now = System.currentTimeMillis()
+            if (now - lastProgressUpdate >= progressUpdateInterval) {
+                lastProgressUpdate = now
+                logger?.debug("Chunk progress update")
+                notifyListeners { listener ->
+                    listener.onChunkCompleted(
+                        depotId = depot.depotId,
+                        depotPercentComplete = depotPercentage,
+                        compressedBytes = downloadCounter.totalBytesCompressed,
+                        uncompressedBytes = downloadCounter.totalBytesUncompressed
+                    )
+                }
             }
 
             val remainingDownloads = item.fileStreamData.chunksDownloaded.decrementAndGet()
