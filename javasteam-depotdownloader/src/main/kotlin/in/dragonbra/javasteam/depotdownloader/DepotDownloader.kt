@@ -1574,7 +1574,7 @@ class DepotDownloader @JvmOverloads constructor(
         ensureActive()
 
         // Create temporary file path for this chunk
-        // Try to set it to the Download path, use installdir as fallback, probably unessecary
+        // Try to set it to the Download path, use installdir as fallback
         val chunkTempDir = (config.downloadPath ?: depot.installDir) / STAGING_DIR / "chunks" / fileId
         filesystem.createDirectories(chunkTempDir)
         val chunkTempPath = chunkTempDir / "${chunk.offset}_$chunkID.chunk"
@@ -1731,7 +1731,6 @@ class DepotDownloader @JvmOverloads constructor(
                     downloadManifestOnly = item.downloadManifestOnly,
                     installPath = item.installDirectory?.toPath(),
                     installToGameNameDirectory = item.installToGameNameDirectory,
-                    downloadPath = (item as? AppItem)?.downloadDirectory?.toPath(),
                 )
 
                 processingItemsMap[item.appId] = item
@@ -1750,6 +1749,8 @@ class DepotDownloader @JvmOverloads constructor(
                     }
 
                     is AppItem -> {
+                        config = config.copy(downloadPath = item.downloadDirectory?.toPath())
+
                         val branch = item.branch ?: DEFAULT_BRANCH
                         config = config.copy(betaPassword = item.branchPassword)
 
